@@ -1,0 +1,271 @@
+#pragma once
+
+
+#include "Kismet/BlueprintAsyncActionBase.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+
+#include "SourenaAPI.h"
+
+
+#include "SourenaBlueprintAPI.generated.h"
+
+
+
+DECLARE_DYNAMIC_DELEGATE(FSourenaEmptyDD);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FSourenaConnectErrorDD, const FString&, error);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FSourenaFailDD, const FRpcError&, error);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCLoginResultDD, const FGCLoginResult&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCMatchmakeResultDD, const FGCMatchmakeResult&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCRelationshipsResultDD, const TArray<FGCRelationshipInfo>&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCFindUserLikeResultsDD, const TArray<FGCUserFindInfo>&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCFriendGetAllPrivateChatsResultsDD, const TArray<FGCPrivateMessage>&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCFriendSendPrivateChatResultDD, const FGCPrivateMessage&, result);
+
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGSRegisterResultDD, const FGSRegisterResult&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGSPlayerJoinResultDD, const FGSPlayerJoinResult&, result);
+
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGetDataTableResultDD, const FSourenaDataTable&, result);
+
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGCPartyGetInfoDD, const FSourenaPartyInfo&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FPartySetReadyResultDD, const FSourenaPartySetReadyResult&, result);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FGetUserPresenceResultDD, const FSourenaUserPresence&, result);
+
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_RelationUpdate_MC, USourenaGameClient*, SourenaGC, const FGCRelationUpdateNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PrivateMessage_MC, USourenaGameClient*, SourenaGC, const FGCPrivateMessage&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_FriendOnline_MC  , USourenaGameClient*, SourenaGC, const FSourenaFriendOnOffNotification&, params);
+
+
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyMessage_MC			, USourenaGameClient*, SourenaGC, const FSourenaPartyMessage&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyInvite_MC				, USourenaGameClient*, SourenaGC, const FSourenaPartyInviteNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyUserLeft_MC			, USourenaGameClient*, SourenaGC, const FSourenaPartyUserJoinLeaveNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyUserJoined_MC			, USourenaGameClient*, SourenaGC, const FSourenaPartyUserJoinLeaveNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyUserReady_MC			, USourenaGameClient*, SourenaGC, const FSourenaPartyUserReadyNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyPublicDataUpdate_MC	, USourenaGameClient*, SourenaGC, const FSourenaPartyDataNotification&, params);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNotify_PartyPrivateDataUpdate_MC	, USourenaGameClient*, SourenaGC, const FSourenaPartyDataNotification&, params);
+
+
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNotify_DebugMessage_MC, const FString&, Message);
+
+
+
+UCLASS()
+class USourenaAPIBase : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	//try to call the specified function at next frame.
+	void CallNextFrame(TFunction<void()>&& cb);
+	//
+	virtual TSharedPtr<FSourenaBaseAPI> GetBaseAPI() const;
+
+	UFUNCTION(BlueprintCallable)
+	void GetDataTable(const FString& tableName, FGetDataTableResultDD onSuccess, FSourenaFailDD onError);
+
+};
+
+/*
+base class that keeps the reference to the shared pointer so we can call TSharedPtr and Blueprint functions together.
+the beast approach is to have a USourenaGameClientBase* in your UGameInstance.
+*/
+UCLASS(Blueprintable, BlueprintType)
+class USourenaGameClientBase : public USourenaAPIBase
+{
+	GENERATED_BODY()
+public:
+	TSharedPtr<FSourenaGC> Refrence;
+	UFUNCTION(BlueprintPure)
+	bool IsRefrenceValid() const;
+	//
+	TSharedPtr<FSourenaBaseAPI> GetBaseAPI() const override;
+
+	void BeginDestroy() override;
+
+
+};
+
+UCLASS(Blueprintable, BlueprintType)
+class USourenaGameServerBase : public USourenaAPIBase
+{
+	GENERATED_BODY()
+public:
+	TSharedPtr<FSourenaGS> Refrence;
+
+	UFUNCTION(BlueprintPure)
+	bool IsRefrenceValid() const;
+	//
+	TSharedPtr<FSourenaBaseAPI> GetBaseAPI() const override;
+
+	void BeginDestroy() override;
+};
+
+/*
+blueprint wrapper for FSourenaGC
+*/
+UCLASS(Blueprintable, BlueprintType)
+class USourenaGameClient : public USourenaGameClientBase
+{
+	GENERATED_BODY()
+
+public:
+	/*
+	creates a new connection to master server. keep the result somewhere.
+	*/
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	static USourenaGameClient* Connect(const FString& url, FSourenaEmptyDD onConnect, FSourenaConnectErrorDD onError);
+
+	void BindDelegates();
+
+	/*
+		@param	sessionToken	session token generated by the previous login
+	*/
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void LoginByToken(const FString& sessionToken, FGCLoginResultDD onResult, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	/**
+	 *	@param	identity	email or username
+	 *	@param	password	password
+	 */
+	void LoginEmailPass(const FString& identity, const FString& password, FGCLoginResultDD onResult, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void Matchmake(const FGCMatchmakeParams& params, FGCMatchmakeResultDD onResult, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void Logout(FSourenaEmptyDD onResult, FSourenaFailDD onError);
+
+	UFUNCTION(BlueprintPure, Category = "SourenaBK")
+	const FGCLoginResult& GetLoginResult() const;
+
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void RequestFriendship(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void CancelPendingFriendship(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void AcceptFriendship(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void DeclineFriendship(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void RelationBlockUser(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void RelationUnblockUser(const FString& uih, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void GetRelationships(FGCRelationshipsResultDD onSuccess, FSourenaFailDD onError);
+
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void FindUserLike(const FString like, FGCFindUserLikeResultsDD onSuccess, FSourenaFailDD onError);
+
+	UFUNCTION(BlueprintCallable)
+	void FriendSendPrivateChat(const FString& friendUIH, const FString& message, FGCFriendSendPrivateChatResultDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void FriendGetAllPrivateChats(const FString& friendUIH, FGCFriendGetAllPrivateChatsResultsDD onSuccess, FSourenaFailDD onError);
+
+
+
+
+	UFUNCTION(BlueprintCallable)
+	void PartyCreate(const FString& partyClass, FGCPartyGetInfoDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartyLeave(FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartyInvite(const FString& guest, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartyJoin(const FString& ticket, FGCPartyGetInfoDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartyGetInfo(FGCPartyGetInfoDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartySetPublicData(const FString& key, const FString& value, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartySetPrivateData(const FString& key, const FString& value, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartySetReady(bool bReady, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable)
+	void PartySendMessage(const FString& message, FSourenaEmptyDD onSuccess, FSourenaFailDD onError);
+	
+	
+	UFUNCTION(BlueprintCallable)
+	void GetUserPresence(const FString& user, FGetUserPresenceResultDD onSuccess, FSourenaFailDD onError);
+
+
+
+	UPROPERTY(BlueprintAssignable)
+	FNotify_DebugMessage_MC OnDebugMessage;
+
+
+
+	UPROPERTY(BlueprintAssignable)
+	FNotify_RelationUpdate_MC OnRelationUpdate;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PrivateMessage_MC OnPrivateMessage;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_FriendOnline_MC	 OnFriendOnline;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_FriendOnline_MC	 OnFriendOffline;
+
+
+
+
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyMessage_MC OnPartyMessage;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyInvite_MC OnPartyInvite;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyUserLeft_MC OnPartyUserLeft;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyUserJoined_MC OnPartyUserJoined;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyUserReady_MC OnPartyUserReady;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyPublicDataUpdate_MC OnPartyPublicDataUpdate;
+	UPROPERTY(BlueprintAssignable)
+	FNotify_PartyPrivateDataUpdate_MC OnPartyPrivateDataUpdate;
+
+
+
+private:
+	void OnNotify_DebugMessage(const FString& message);
+	void OnNotify_RelationUpdate(const FGCRelationUpdateNotification& params);
+	void OnNotify_PrivateMessage(const FGCPrivateMessage& params);
+	void OnNotify_FriendOnline(const FSourenaFriendOnOffNotification& params);
+	void OnNotify_FriendOffline(const FSourenaFriendOnOffNotification& params);
+
+
+
+	void OnNotify_PartyMessage( const FSourenaPartyMessage&);
+	void OnNotify_PartyInvite(const FSourenaPartyInviteNotification&);
+	void OnNotify_PartyUserLeft(const FSourenaPartyUserJoinLeaveNotification&);
+	void OnNotify_PartyUserJoined(const FSourenaPartyUserJoinLeaveNotification&);
+	void OnNotify_PartyUserReady(const FSourenaPartyUserReadyNotification&);
+	void OnNotify_PartyPublicDataUpdate(const FSourenaPartyDataNotification&);
+	void OnNotify_PartyPrivateDataUpdate(const FSourenaPartyDataNotification&);
+};
+
+/*
+blueprint wrapper for FSourenaGS
+*/
+UCLASS(Blueprintable, BlueprintType)
+class USourenaGameServer : public USourenaGameServerBase
+{
+	GENERATED_BODY()
+
+public:
+	/*
+	creates a new connection to master server. keep the result somewhere.
+	*/
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	static USourenaGameServer* Connect(const FString& url, FSourenaEmptyDD onConnect, FSourenaConnectErrorDD onError);
+
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void Register(const FGSRegisterParams& params, FGSRegisterResultDD onResult, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void PlayerJoin(const FString& ticket, FGSPlayerJoinResultDD onResult, FSourenaFailDD onError);
+	UFUNCTION(BlueprintCallable, Category = "SourenaBK")
+	void Unregister(FSourenaEmptyDD onResult, FSourenaFailDD onError);
+	
+	UFUNCTION(BlueprintPure, Category = "SourenaBK")
+	const FGSRegisterResult& GetRegisterResult() const;
+};
+
+
+
